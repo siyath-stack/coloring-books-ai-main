@@ -663,15 +663,32 @@ class ColoringBookGenerator:
 
             blurred = cv2.GaussianBlur(gray, (0, 0), blur_sigma)
             edges = cv2.Canny(blurred, *canny_thresholds)
+
+            # Remove scattered speckle noise from AI outputs without erasing the main
+            # subject outlines. Using a relative threshold keeps genuine detail while
+            # stripping tiny disconnected artifacts around the subject.
             if thickness:
-                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-                edges = cv2.dilate(edges, kernel, iterations=thickness)
+                cleanup_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                edges = cv2.dilate(edges, cleanup_kernel, iterations=thickness)
 
             count, labels, stats, _ = cv2.connectedComponentsWithStats(edges, connectivity=8)
-            min_component_area = max(8, int(edges.size * 0.00001))
-            for idx in range(1, count):
-                if stats[idx, cv2.CC_STAT_AREA] < min_component_area:
-                    edges[labels == idx] = 0
+            if count > 1:
+                component_areas = stats[1:, cv2.CC_STAT_AREA]
+                largest_component_area = max(int(component_areas.max()), 1)
+                min_component_area = max(24, int(largest_component_area * 0.015))
+                border_margin = max(1, min(edges.shape[0], edges.shape[1]) // 200)
+                for idx in range(1, count):
+                    area = stats[idx, cv2.CC_STAT_AREA]
+                    x, y, w, h, _ = stats[idx]
+                    touching_border = (
+                        x <= border_margin or y <= border_margin
+                        or x + w >= edges.shape[1] - border_margin
+                        or y + h >= edges.shape[0] - border_margin
+                    )
+                    if area < min_component_area:
+                        edges[labels == idx] = 0
+                    elif touching_border and area < min_component_area * 10:
+                        edges[labels == idx] = 0
 
             result = cv2.bitwise_not(edges)
             source_height, source_width = result.shape

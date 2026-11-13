@@ -12,7 +12,10 @@ Run this before releasing new versions to ensure quality.
 """
 
 import sys
+from io import BytesIO
 from pathlib import Path
+from PIL import Image, ImageDraw
+import numpy as np
 from coloring_book_generator import (
     validate_dependencies,
     validate_image_quality,
@@ -109,6 +112,39 @@ def test_generator_has_validation():
     print("  ✓ Generator has quality assurance methods")
 
 
+def test_lineart_removes_scattered_noise():
+    """Large outline should survive while isolated specks are stripped out."""
+    print("\n🧪 Testing line art cleanup for scattered specks...")
+
+    image = Image.new("RGB", (768, 768), "white")
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((140, 120, 630, 650), outline="black", width=8)
+
+    for row in range(3):
+        for column in range(8):
+            x = 20 + column * 30
+            y = 20 + row * 30
+            draw.rectangle((x, y, x + 2, y + 2), fill="black")
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+
+    output = ColoringBookGenerator(force_lineart=True, lineart_method="enhanced")
+    converted = Image.open(BytesIO(output.convert_to_coloring_page(
+        buffer.getvalue(),
+        method="enhanced",
+        target_size=(2550, 3300),
+    )))
+    converted_array = np.array(converted)
+
+    assert len(np.unique(converted_array)) <= 2, "Line art should remain binary"
+    assert np.count_nonzero(converted_array < 128) > 0, "Main outline should survive cleanup"
+    assert np.count_nonzero(converted_array < 128) < 0.25 * converted_array.size, \
+        "Cleanup should not leave large filled regions"
+
+    print("  ✓ Scattered specks are removed without erasing the main subject")
+
+
 def run_unit_tests():
     """Run all unit tests."""
     print("=" * 70)
@@ -122,6 +158,7 @@ def run_unit_tests():
         ("Image Validation", test_image_validation_mock),
         ("Quality Regression Prevention", test_quality_regression_prevention),
         ("Generator QA Methods", test_generator_has_validation),
+        ("Line art speck cleanup", test_lineart_removes_scattered_noise),
     ]
 
     passed = 0
