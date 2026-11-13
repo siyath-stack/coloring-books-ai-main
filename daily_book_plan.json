@@ -1,0 +1,189 @@
+{
+  "subject": "Barnaby the Baby Capybara",
+  "category": "Barnaby's Big Day",
+  "target_age": "Ages 2-5 Toddler Bold & Easy",
+  "character_dna": "adorable chubby baby capybara pup, round squishy body, tiny rounded ears, blunt snout, short legs, no tail, 2D vector line art",
+  "habitat_rules": "Simple open scenes with a few large story details and plenty of white space",
+  "scenes": [
+    {
+      "action": "wakes up and stretches beside a tiny seed",
+      "setting": "A cozy nest beside the garden gate at sunrise",
+      "composition": "A wide view with the animal on the left and the brightening sky above",
+      "micro_prompt": "A tiny seed is waiting for a big adventure."
+    },
+    {
+      "action": "spots the seed and sniffs it with curiosity",
+      "setting": "The seed resting on a stepping stone near the nest",
+      "composition": "A close view with the animal leaning in from the right",
+      "micro_prompt": "What could this little seed grow into?"
+    },
+    {
+      "action": "carefully nudges the seed into a patch of soft soil",
+      "setting": "A small garden bed with a little mound of earth",
+      "composition": "A low side view with the animal beside the garden bed",
+      "micro_prompt": "The seed finds a snug place in the soil."
+    },
+    {
+      "action": "pats the soil gently around the seed",
+      "setting": "A neat garden bed edged with three round stones",
+      "composition": "A front view with the animal behind the garden bed",
+      "micro_prompt": "A gentle pat helps the seed settle in."
+    },
+    {
+      "action": "brings a splash of water to the garden",
+      "setting": "A watering can beside the freshly planted seed",
+      "composition": "A three-quarter view with water drops arcing toward the soil",
+      "micro_prompt": "A drink of water helps the seed wake up."
+    },
+    {
+      "action": "watches raindrops fall on the garden",
+      "setting": "A soft rain cloud above the garden and a small puddle",
+      "composition": "A wide view with the animal sheltering beside a leafy plant",
+      "micro_prompt": "Rain taps a happy rhythm on the garden."
+    },
+    {
+      "action": "shares the garden path with a passing snail",
+      "setting": "A curved garden path with a snail and tiny mushrooms",
+      "composition": "A ground-level view following the winding path",
+      "micro_prompt": "A slow little visitor joins the garden walk."
+    },
+    {
+      "action": "notices a tiny green sprout peeking through",
+      "setting": "A new sprout growing in the center of the garden bed",
+      "composition": "A close view with the animal looking down at the sprout",
+      "micro_prompt": "Look! The first green sprout says hello."
+    },
+    {
+      "action": "greets a butterfly fluttering above the sprout",
+      "setting": "A butterfly, two flowers, and the young sprout",
+      "composition": "A tall composition with the butterfly near the top",
+      "micro_prompt": "A butterfly flutters by to say hello."
+    },
+    {
+      "action": "follows the garden path to fetch more water",
+      "setting": "A winding path leading from a stream back to the garden",
+      "composition": "A side view with the animal walking across the page",
+      "micro_prompt": "The little gardener sets off for more water."
+    },
+    {
+      "action": "fills a leaf-shaped cup at the stream",
+      "setting": "A clear stream with smooth stones and reeds",
+      "composition": "A wide landscape view with the stream crossing the page",
+      "micro_prompt": "A sparkling stream fills the little leaf cup."
+    },
+    {
+      "action": "carefully carries the water back home",
+      "setting": "A garden path lined with daisies and a low fence",
+      "composition": "A full-body walking view with flowers on both sides",
+      "micro_prompt": "Careful steps bring the water safely home."
+    },
+    {
+      "action": "pours water beside the growing sprout",
+      "setting": "The garden bed with a small cup and curling water drops",
+      "composition": "A close side view focused on the animal and the sprout",
+      "micro_prompt": "The sprout gets another refreshing drink."
+    },
+    {
+      "action": "looks up as the sun peeks through the clouds",
+      "setting": "Sun rays, a cloud, and the garden fence",
+      "composition": "A low-angle view with the animal gazing toward the sky",
+      "micro_prompt": "Warm sunshine returns to the garden."
+    },
+    {
+      "action": "finds a ladybug resting on a broad leaf",
+      "setting": "A large leaf with a ladybug and two small flowers",
+      "composition": "A close view with the leaf in the foreground",
+      "micro_prompt": "A spotted friend takes a rest on a leaf."
+    },
+    {
+      "action": "carefully steps around the new leaves",
+      "setting": "A row of broad leaves growing beside the garden path",
+      "composition": "A top-down view of the winding path and leafy row",
+      "micro_prompt": "The growing leaves make a green little maze."
+    },
+    {
+      "action": "watches a flower bud begin to open",
+      "setting": "A tall flower bud rising above the garden bed",
+      "composition": "A centered portrait view with the animal beside the bud",
+      "micro_prompt": "A sleepy flower bud starts to yawn open."
+    },
+    {
+      "action": "meets a cheerful bird perched on the fence",
+      "setting": "A simple fence with a bird and the growing flower",
+      "composition": "A wide view with the bird above and the animal below",
+      "micro_prompt": "A cheerful bird sings a garden song."
+    },
+    {
+      "action": "shares a quiet picnic beside the flowers",
+      "setting": "A picnic blanket with berries beside the garden",
+      "composition": "A slightly overhead view of the blanket and blooming plants",
+      "micro_prompt": "A berry picnic tastes sweeter with a friend."
+    },
+    {
+      "action": "smells the first open flower",
+      "setting": "A large open flower with leaves and a small bee",
+      "composition": "A close view with the flower in the foreground",
+      "micro_prompt": "The first flower smells like a sunny day."
+    },
+    {
+      "action": "helps a friend find the way through the garden",
+      "setting": "A stepping-stone trail between tall but simple flowers",
+      "composition": "A winding composition with both animals fully visible",
+      "micro_prompt": "A kind guide leads a friend along the path."
+    },
+    {
+      "action": "watches the flower grow taller than the fence",
+      "setting": "A tall leafy flower beside a short garden fence",
+      "composition": "A vertical composition with the animal looking upward",
+      "micro_prompt": "The flower grows taller and taller."
+    },
+    {
+      "action": "discovers the flower is a bright sunflower",
+      "setting": "A sunflower with a large open center and broad leaves",
+      "composition": "A centered view with the sunflower rising behind the animal",
+      "micro_prompt": "Surprise! The garden has grown a sunflower."
+    },
+    {
+      "action": "counts the sunflower's big petals",
+      "setting": "A large sunflower with a few simple garden leaves",
+      "composition": "A close-up flower view with the animal peeking beside it",
+      "micro_prompt": "How many sunny petals can you count?"
+    },
+    {
+      "action": "welcomes bees buzzing around the sunflower",
+      "setting": "A sunflower with two friendly bees and open sky",
+      "composition": "A balanced view with bees on opposite sides of the flower",
+      "micro_prompt": "Busy bees come to visit the sunflower."
+    },
+    {
+      "action": "rests in the shade of the tall sunflower",
+      "setting": "A large sunflower casting no shadow beside a small bench",
+      "composition": "A calm side view with the animal resting under the flower",
+      "micro_prompt": "A cool resting spot waits beneath the flower."
+    },
+    {
+      "action": "shares sunflower seeds with garden friends",
+      "setting": "A little pile of seeds with a bird and a rabbit nearby",
+      "composition": "A group scene arranged in a gentle arc",
+      "micro_prompt": "The garden friends share a tasty seed snack."
+    },
+    {
+      "action": "watches the evening sky turn starry",
+      "setting": "The garden fence beneath a crescent moon and a few stars",
+      "composition": "A wide evening view with the animal looking up",
+      "micro_prompt": "The first stars twinkle above the garden."
+    },
+    {
+      "action": "says goodnight to the sunflower",
+      "setting": "The sunflower beside the garden gate at twilight",
+      "composition": "A quiet close view with the animal beside the flower",
+      "micro_prompt": "Goodnight, sunflower. Thank you for growing."
+    },
+    {
+      "action": "curls up for sleep dreaming of tomorrow's garden",
+      "setting": "A cozy nest with a small flower and one safe seed nearby",
+      "composition": "A peaceful centered bedtime scene with open white space",
+      "micro_prompt": "A new seed waits for tomorrow's adventure."
+    }
+  ]
+}

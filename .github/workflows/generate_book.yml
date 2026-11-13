@@ -1,0 +1,45 @@
+name: Generate Daily Coloring Book PDF
+
+'on':
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * *'
+
+jobs:
+  build-coloring-book:
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+    steps:
+      - name: Check out Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install System Fonts and Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core fonts-liberation libgl1
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Generate Daily Book Plan
+        run: python research_trend.py
+
+      - name: Generate Pages and Compile PDF
+        run: python generate_book.py
+
+      - name: Upload PDF Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-coloring-book-pdf
+          path: '*.pdf'
+          if-no-files-found: error
+          retention-days: 14
