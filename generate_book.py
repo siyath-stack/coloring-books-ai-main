@@ -266,19 +266,41 @@ def add_print_safe_margin(gray_pil_img):
 def remove_isolated_specks(gray_pil_img):
     pixels = np.asarray(gray_pil_img.convert("L"), dtype=np.uint8).copy()
     ink = pixels <= 140
-    speck_area_limit = max(6, int(ink.size * 0.00001))
     component_count, labels, component_stats, _ = cv2.connectedComponentsWithStats(
         ink.astype(np.uint8), connectivity=8
     )
     if component_count <= 1:
         return Image.fromarray(pixels)
 
-    component_areas = component_stats[1:, cv2.CC_STAT_AREA]
-    speck_labels = np.flatnonzero(
-        (component_areas > 0) & (component_areas <= speck_area_limit)
-    ) + 1
-    if speck_labels.size:
-        pixels[np.isin(labels, speck_labels)] = 255
+    largest_label = 1 + int(np.argmax(component_stats[1:, cv2.CC_STAT_AREA]))
+    main_x, main_y, main_w, main_h, _ = component_stats[largest_label]
+    main_area = int(component_stats[largest_label, cv2.CC_STAT_AREA])
+    speck_area_limit = max(12, int(main_area * 0.12))
+    white_background = np.uint8(pixels > 140)
+    flood_mask = np.zeros((ink.shape[0] + 2, ink.shape[1] + 2), dtype=np.uint8)
+    cv2.floodFill(white_background, flood_mask, (0, 0), 2)
+    outside_white = white_background == 2
+    cleanup_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+
+    for label in range(1, component_count):
+        x, y, width, height, area = component_stats[label]
+        if area > speck_area_limit:
+            continue
+
+        component_mask = labels == label
+        neighborhood = cv2.dilate(
+            np.uint8(component_mask), cleanup_kernel, iterations=1
+        ).astype(bool) & ~component_mask & (pixels > 140)
+        neighbors = int(np.count_nonzero(neighborhood))
+        is_outside_subject = (
+            neighbors > 0
+            and float(np.count_nonzero(outside_white & neighborhood) / neighbors) > 0.6
+        )
+        distance_x = max(main_x - (x + width), x - (main_x + main_w), 0)
+        distance_y = max(main_y - (y + height), y - (main_y + main_h), 0)
+        if is_outside_subject or distance_x > 0 or distance_y > 0:
+            pixels[component_mask] = 255
+
     return Image.fromarray(pixels)
 
 def line_art_quality_issues(gray_pil_img):
@@ -342,10 +364,68 @@ def line_art_quality_issues(gray_pil_img):
 
 def convert_solid_regions_to_outlines(gray_pil_img):
     """Convert dark regions to contours and discard oversized circular backdrops."""
-    pixels = np.asarray(gray_pil_img.convert("L"), dtype=np.uint8)
+    pixels = np.asarray(gray_pil_img.convert("L"), dtype=np.uint8).copy()
     ink = pixels <= 140
+    component_count, labels, component_stats, _ = cv2.connectedComponentsWithStats(
+        ink.astype(np.uint8), connectivity=8
+    )
+    if component_count > 2:
+        backdrop_labels = []
+        min_inner_area = max(12, int(ink.size * 0.00005))
+        for label in range(1, component_count):
+            x, y, width, height, area = component_stats[label]
+            box_area = width * height
+            if (
+                box_area < ink.size * 0.15
+                or not 0.8 <= width / height <= 1.25
+                or area < min_inner_area
+            ):
+                continue
+
+            component = np.uint8(labels == label)
+            points = cv2.findNonZero(component)
+            if points is None:
+                continue
+            hull = cv2.convexHull(points)
+            perimeter = cv2.arcLength(hull, True)
+            circularity = (
+                4 * np.pi * cv2.contourArea(hull) / (perimeter * perimeter)
+                if perimeter else 0
+            )
+            centered = (
+                abs(x + width / 2 - ink.shape[1] / 2) <= ink.shape[1] * 0.15
+                and abs(y + height / 2 - ink.shape[0] / 2) <= ink.shape[0] * 0.15
+            )
+            if not centered or circularity < 0.95:
+                continue
+
+            contains_subject = False
+            for other in range(1, component_count):
+                if other == label:
+                    continue
+                other_x, other_y, other_w, other_h, other_area = component_stats[other]
+                other_center_x = other_x + other_w / 2
+                other_center_y = other_y + other_h / 2
+                if (
+                    other_area >= min_inner_area
+                    and x <= other_center_x <= x + width
+                    and y <= other_center_y <= y + height
+                ):
+                    contains_subject = True
+                    break
+            if contains_subject:
+                backdrop_labels.append(label)
+
+        cleanup_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        for label in backdrop_labels:
+            component_mask = np.uint8(labels == label)
+            expanded_mask = cv2.dilate(component_mask, cleanup_kernel, iterations=1)
+            pixels[expanded_mask > 0] = 255
+        if backdrop_labels:
+            ink = pixels <= 140
+
     if float(np.mean(ink)) < 0.08:
-        return gray_pil_img.convert("L")
+        return Image.fromarray(pixels)
 
     contours, hierarchy = cv2.findContours(
         ink.astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE

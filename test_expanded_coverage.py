@@ -754,6 +754,27 @@ class TestInteriorLineArtQuality:
         print("  ✓ Sparse outline art is preserved without invented contours")
         return True
 
+    def test_circular_backdrop_and_detached_specks_are_removed(self):
+        image = Image.new("L", (768, 768), "white")
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((140, 140, 628, 628), outline="black", width=8)
+        draw.ellipse((285, 230, 485, 570), outline="black", width=8)
+        draw.ellipse((330, 300, 346, 316), outline="black", width=4)
+        for x, y in ((80, 120), (680, 200), (640, 650), (100, 660)):
+            draw.rectangle((x, y, x + 10, y + 10), fill="black")
+
+        result = remove_isolated_specks(convert_solid_regions_to_outlines(image))
+        pixels = np.asarray(result)
+        assert pixels[140, 384] == 255, "Circular backdrop should be removed"
+        assert pixels[230, 385] == 0, "Main character outline should remain"
+        assert pixels[300, 338] == 0, "Character details should remain"
+        assert all(pixels[y, x] == 255 for x, y in (
+            (80, 120), (680, 200), (640, 650), (100, 660)
+        )), "Detached specks should be removed"
+        assert not line_art_quality_issues(result), line_art_quality_issues(result)
+        print("  ✓ Storybook cleanup removes circular frames and stray marks")
+        return True
+
     def test_quality_check_rejects_large_fill_below_ink_limit(self):
         image = Image.new("L", (768, 768), "white")
         ImageDraw.Draw(image).ellipse((210, 170, 560, 600), fill="black")
@@ -1142,6 +1163,7 @@ def run_all_tests():
     results.append(("Repair solid-filled animal", interior_tests.test_solid_fill_is_converted_to_open_coloring_shape()))
     results.append(("Remove circular backdrop", interior_tests.test_large_circular_backdrop_is_not_traced()))
     results.append(("Remove circular halo", interior_tests.test_circular_halo_is_removed_entirely()))
+    results.append(("Clean storybook backdrop noise", interior_tests.test_circular_backdrop_and_detached_specks_are_removed()))
     results.append(("Reject localized solid fill", interior_tests.test_quality_check_rejects_large_fill_below_ink_limit()))
     results.append(("Repair without extra requests", interior_tests.test_filled_generation_is_repaired_without_extra_requests()))
     results.append(("Illustrate distinct story scenes", interior_tests.test_story_scene_details_reach_the_image_prompt()))
