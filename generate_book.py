@@ -30,6 +30,10 @@ class CloudflareQuotaExceeded(RuntimeError):
     """Raised when Cloudflare's daily AI allocation is exhausted."""
 
 
+class CloudflarePromptRejected(RuntimeError):
+    """Raised when Cloudflare's safety filter rejects an image prompt."""
+
+
 class ImageProviderUnavailable(RuntimeError):
     """Raised when no configured image provider can return an image."""
 
@@ -49,6 +53,23 @@ def cloudflare_quota_error(response):
     )
     if any(token in details.lower() for token in ("4006", "daily free allocation", "neurons")):
         return details or response.text[:500]
+    return None
+
+
+def cloudflare_prompt_rejection(response):
+    """Return Cloudflare's prompt-safety rejection detail, if present."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+
+    errors = body.get("errors", []) if isinstance(body, dict) else []
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        message = str(error.get("message", ""))
+        if error.get("code") == 3030 or "input prompt contains nsfw content" in message.lower():
+            return f"{error.get('code', '')} {message}".strip()
     return None
 
 
@@ -140,6 +161,13 @@ def fetch_book_image(prompt, model, model_options=None):
         print(
             "[Warning] Cloudflare's daily AI allocation is exhausted; "
             "switching image generation to Pollinations."
+        )
+        return fetch_pollinations_image(prompt)
+    except CloudflarePromptRejected as error:
+        POLLINATIONS_FALLBACK_ACTIVE = True
+        print(
+            "[Warning] Cloudflare's prompt safety filter rejected this image; "
+            f"switching image generation to Pollinations ({error})."
         )
         return fetch_pollinations_image(prompt)
 
@@ -401,6 +429,11 @@ def fetch_cloudflare_image(prompt, model, max_retries=6, negative_prompt=None, m
                 continue
 
             if 400 <= response.status_code < 500:
+                prompt_rejection = cloudflare_prompt_rejection(response)
+                if prompt_rejection:
+                    raise CloudflarePromptRejected(
+                        f"Cloudflare rejected the image prompt: {prompt_rejection}"
+                    )
                 raise RuntimeError(
                     f"Cloudflare rejected image request for model {model} "
                     f"(HTTP {response.status_code}): {response.text[:500]}"

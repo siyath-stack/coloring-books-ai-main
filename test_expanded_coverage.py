@@ -344,6 +344,33 @@ class TestCloudflareImageRequests:
         print("  ✓ Quota exhaustion switches subsequent image requests to Pollinations")
         return True
 
+    def test_safety_rejection_switches_to_pollinations(self):
+        rejection = self.response(
+            400,
+            json.dumps({
+                "errors": [{
+                    "code": 3030,
+                    "message": "AiError: Input prompt contains NSFW content.",
+                }],
+                "success": False,
+            }).encode(),
+            {"Content-Type": "application/json"},
+        )
+        with patch("generate_book.ACCOUNT_ID", "account"), \
+                patch("generate_book.API_TOKEN", "test-token"), \
+                patch("generate_book.CLOUDFLARE_QUOTA_EXHAUSTED", False), \
+                patch("generate_book.POLLINATIONS_FALLBACK_ACTIVE", False), \
+                patch("generate_book.session.post", return_value=rejection) as post, \
+                patch("generate_book.fetch_pollinations_image", return_value=b"generated-image") as pollinations:
+            first = fetch_book_image("family-friendly toddler coloring page", "test-model")
+            second = fetch_book_image("another interior page", "test-model")
+
+        assert first == second == b"generated-image"
+        assert post.call_count == 1, "Cloudflare should not be called again after a safety rejection"
+        assert pollinations.call_count == 2
+        print("  ✓ Cloudflare prompt-safety rejection switches subsequent requests to Pollinations")
+        return True
+
     def test_pollinations_rejects_non_image_responses(self):
         response = self.response(200, b"not an image", {"Content-Type": "text/plain"})
         with patch("generate_book.session.get", return_value=response):
@@ -1091,6 +1118,7 @@ def run_all_tests():
     results.append(("Daily quota stops retries", cloudflare_tests.test_daily_quota_stops_retries()))
     results.append(("Interior uses Pollinations after quota", cloudflare_tests.test_interior_uses_pollinations_after_quota()))
     results.append(("Quota switches image provider", cloudflare_tests.test_quota_switches_to_pollinations()))
+    results.append(("Safety rejection switches provider", cloudflare_tests.test_safety_rejection_switches_to_pollinations()))
     results.append(("Pollinations image validation", cloudflare_tests.test_pollinations_rejects_non_image_responses()))
     results.append(("Pollinations free-limit retry", cloudflare_tests.test_pollinations_retries_free_limit()))
     results.append(("Pollinations retry bound", cloudflare_tests.test_pollinations_rate_limit_retries_are_bounded()))
