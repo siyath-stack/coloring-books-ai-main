@@ -263,6 +263,24 @@ def add_print_safe_margin(gray_pil_img):
     framed.paste(resized, ((width - resized.width) // 2, (height - resized.height) // 2))
     return framed
 
+def remove_isolated_specks(gray_pil_img):
+    pixels = np.asarray(gray_pil_img.convert("L"), dtype=np.uint8).copy()
+    ink = pixels <= 140
+    speck_area_limit = max(6, int(ink.size * 0.00001))
+    component_count, labels, component_stats, _ = cv2.connectedComponentsWithStats(
+        ink.astype(np.uint8), connectivity=8
+    )
+    if component_count <= 1:
+        return Image.fromarray(pixels)
+
+    component_areas = component_stats[1:, cv2.CC_STAT_AREA]
+    speck_labels = np.flatnonzero(
+        (component_areas > 0) & (component_areas <= speck_area_limit)
+    ) + 1
+    if speck_labels.size:
+        pixels[np.isin(labels, speck_labels)] = 255
+    return Image.fromarray(pixels)
+
 def line_art_quality_issues(gray_pil_img):
     pixels = np.asarray(gray_pil_img.convert("L"), dtype=np.uint8)
     height, width = pixels.shape
@@ -792,6 +810,7 @@ def generate_vector_interior_page(character_dna, scene_data, page_num):
             white_background = Image.new("RGBA", generated.size, "white")
             candidate = Image.alpha_composite(white_background, generated).convert("L")
             candidate = convert_solid_regions_to_outlines(candidate)
+            candidate = remove_isolated_specks(candidate)
             issues = line_art_quality_issues(candidate)
         except (OSError, ValueError) as error:
             candidate = None

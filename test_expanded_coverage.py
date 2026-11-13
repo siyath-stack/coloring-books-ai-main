@@ -49,6 +49,7 @@ from generate_book import (
     generate_cover_page,
     generate_vector_interior_page,
     line_art_quality_issues,
+    remove_isolated_specks,
     main,
 )
 from research_trend import DailyBookPlan, generate_fallback_plan, has_distinct_story_scenes
@@ -524,7 +525,7 @@ class TestInteriorLineArtQuality:
         print("  ✓ Line art with scattered specks is rejected")
         return True
 
-    def test_noisy_generation_retries_with_speck_guidance(self):
+    def test_noisy_generation_cleans_specks_without_retry(self):
         noisy = Image.new("L", (768, 768), "white")
         draw = ImageDraw.Draw(noisy)
         draw.ellipse((140, 120, 630, 650), outline="black", width=8)
@@ -533,26 +534,32 @@ class TestInteriorLineArtQuality:
                 x = 20 + column * 30
                 y = 20 + row * 30
                 draw.rectangle((x, y, x + 1, y + 1), fill="black")
-        clean = Image.new("L", (768, 768), "white")
-        ImageDraw.Draw(clean).ellipse((140, 120, 630, 650), outline="black", width=8)
-        encoded_images = []
-        for image in (noisy, clean):
-            encoded = BytesIO()
-            image.save(encoded, format="PNG")
-            encoded_images.append(encoded.getvalue())
+        encoded = BytesIO()
+        noisy.save(encoded, format="PNG")
         scene = {"action": "plants a tiny seed", "micro_prompt": "A seed starts to grow."}
 
         with patch(
             "generate_book.fetch_book_image",
-            side_effect=encoded_images,
+            return_value=encoded.getvalue(),
         ) as fetch:
             page = generate_vector_interior_page("a small animal", scene, 6)
 
         assert page.size == (2550, 3300)
-        assert fetch.call_count == 2
-        retry_prompt = fetch.call_args_list[1].args[0]
-        assert "Remove every stray dot and speck" in retry_prompt
-        print("  ✓ Speckled art is regenerated with explicit cleanup guidance")
+        fetch.assert_called_once()
+        print("  ✓ Speckled art is cleaned before validation without an extra provider request")
+        return True
+
+    def test_speck_cleanup_preserves_main_outline(self):
+        image = Image.new("L", (768, 768), "white")
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((140, 120, 630, 650), outline="black", width=8)
+        draw.rectangle((20, 20, 21, 21), fill="black")
+
+        cleaned = remove_isolated_specks(image)
+        assert cleaned.getpixel((20, 20)) == 255
+        assert cleaned.getpixel((140, 385)) == 0
+        assert not line_art_quality_issues(cleaned), line_art_quality_issues(cleaned)
+        print("  ✓ Tiny detached noise is removed while the subject outline is preserved")
         return True
 
     def test_line_art_thickening_is_controlled(self):
@@ -1125,7 +1132,8 @@ def run_all_tests():
     results.append(("Book builds after quota fallback", cloudflare_tests.test_quota_workflow_builds_book_with_image_provider_fallback()))
     interior_tests = TestInteriorLineArtQuality()
     results.append(("Reject scattered specks", interior_tests.test_scattered_specks_are_rejected()))
-    results.append(("Retry noisy line art", interior_tests.test_noisy_generation_retries_with_speck_guidance()))
+    results.append(("Clean noisy line art", interior_tests.test_noisy_generation_cleans_specks_without_retry()))
+    results.append(("Preserve outlines during speck cleanup", interior_tests.test_speck_cleanup_preserves_main_outline()))
     results.append(("Control outline thickening", interior_tests.test_line_art_thickening_is_controlled()))
     results.append(("Accept clean outline art", interior_tests.test_clean_outline_is_accepted_with_white_coloring_space()))
     results.append(("Simplify repeated crop failures", interior_tests.test_repeated_cropping_simplifies_the_retry_scene()))
