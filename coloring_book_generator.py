@@ -16,6 +16,7 @@ import json
 import re
 import time
 import random
+import hashlib
 import requests
 import shutil
 from pathlib import Path
@@ -37,6 +38,8 @@ MAX_ACCEPTABLE_COLORS = 2  # For line art (black & white only)
 MIN_FILE_SIZE_BYTES = 10_000  # 10KB - smaller indicates generation issue
 MAX_FILE_SIZE_BYTES = 10_000_000  # 10MB - larger may cause upload issues
 RATE_LIMIT_DELAY_SECONDS = 2  # Delay between API calls to avoid rate limiting
+MAX_PAGE_GENERATION_ATTEMPTS = 3
+PRINT_SAFE_MARGIN_FRACTION = 0.02
 
 # Prompt Variations (shared between generators)
 PROMPT_VARIATIONS = [
@@ -318,6 +321,47 @@ def preflight_checks(force_lineart: bool = False) -> bool:
     return all_ok
 
 
+def image_pixel_hash(image_path: Path) -> str:
+    """Hash normalized pixels so visually identical pages can be detected."""
+    from PIL import Image
+
+    with Image.open(image_path) as image:
+        normalized = image.convert("L")
+        content = f"{normalized.width}x{normalized.height}".encode("ascii")
+        return hashlib.sha256(content + normalized.tobytes()).hexdigest()
+
+
+def print_safe_margin_issue(
+    image_path: Path,
+    margin_fraction: float = PRINT_SAFE_MARGIN_FRACTION,
+) -> Optional[str]:
+    """Return a reason when artwork extends into the page's trim-safe margin."""
+    from PIL import Image
+
+    with Image.open(image_path) as image:
+        grayscale = image.convert("L")
+        ink = grayscale.point(lambda pixel: 255 if pixel < 128 else 0)
+        bounds = ink.getbbox()
+        if bounds is None:
+            return "page contains no visible line art"
+
+        left, top, right, bottom = bounds
+        margin_x = max(1, int(grayscale.width * margin_fraction))
+        margin_y = max(1, int(grayscale.height * margin_fraction))
+        if (
+            left < margin_x
+            or top < margin_y
+            or grayscale.width - right < margin_x
+            or grayscale.height - bottom < margin_y
+        ):
+            return (
+                f"artwork is inside the {margin_fraction:.0%} trim-safe margin "
+                f"(ink bounds: {bounds})"
+            )
+
+    return None
+
+
 # ==================== END QUALITY ASSURANCE FUNCTIONS ====================
 
 # ==================== THEME LOADING ====================
@@ -454,7 +498,11 @@ class ColoringBookGenerator:
         encoded_prompt = urllib.parse.quote(full_prompt)
 
         # Pollinations.ai API - completely free, no auth needed
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={size[0]}&height={size[1]}&nologo=true&model=flux"
+        seed = random.randrange(0, 2**32)
+        url = (
+            f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+            f"?width={size[0]}&height={size[1]}&nologo=true&model=flux&seed={seed}"
+        )
 
         try:
             logger.info(f"  Requesting from Pollinations.ai...")
@@ -821,7 +869,8 @@ class ColoringBookGenerator:
             return self.upscale_to_print_quality(image_bytes)
 
     def _save_book_metadata(self, book_dir: Path, title: str, theme: str,
-                           num_pages: int, generated_pages: list, timestamp: str):
+                           num_pages: int, generated_pages: list, timestamp: str,
+                           failed_pages: Optional[list] = None):
         """Save book metadata to JSON file.
 
         Extracted helper method for better organization.
@@ -839,6 +888,7 @@ class ColoringBookGenerator:
             "theme": theme,
             "pages": num_pages,
             "generated": len(generated_pages),
+            "failed_pages": failed_pages or [],
             "timestamp": timestamp,
             "pages_data": generated_pages
         }
@@ -846,7 +896,13 @@ class ColoringBookGenerator:
         metadata_file = book_dir / "metadata.json"
         metadata_file.write_text(json.dumps(metadata, indent=2))
 
-    def generate_book(self, theme: str, num_pages: int = 30, book_title: str = None) -> Path:
+    def generate_book(
+        self,
+        theme: str,
+        num_pages: int = 30,
+        book_title: str = None,
+        resume_from: Optional[Path] = None,
+    ) -> Path:
         """Generate a complete coloring book."""
 
         # PRE-FLIGHT CHECKS: Ensure system is ready
@@ -860,10 +916,38 @@ class ColoringBookGenerator:
         title = book_title or theme_data["name"]
         safe_title = title.replace(" ", "_").replace(":", "")
 
-        # Create book directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        book_dir = self.output_dir / f"{safe_title}_{timestamp}"
-        book_dir.mkdir(parents=True, exist_ok=True)
+        if num_pages < 1:
+            raise ValueError("Page count must be at least one.")
+
+        if resume_from is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            book_dir = self.output_dir / f"{safe_title}_{timestamp}"
+            book_dir.mkdir(parents=True, exist_ok=True)
+            existing_pages = []
+        else:
+            book_dir = Path(resume_from).expanduser()
+            metadata_file = book_dir / "metadata.json"
+            if not book_dir.is_dir() or not metadata_file.is_file():
+                raise FileNotFoundError(
+                    f"Cannot resume: '{book_dir}' is not a generated book directory."
+                )
+            try:
+                previous_metadata = json.loads(metadata_file.read_text())
+            except (OSError, json.JSONDecodeError) as error:
+                raise RuntimeError(f"Cannot resume from invalid metadata: {error}") from error
+            if (
+                previous_metadata.get("title") != title
+                or previous_metadata.get("theme") != theme
+                or previous_metadata.get("pages") != num_pages
+            ):
+                raise ValueError(
+                    "Resume settings must match the existing book's title, theme, and page count."
+                )
+            timestamp = previous_metadata.get("timestamp", datetime.now().strftime("%Y%m%d_%H%M%S"))
+            existing_pages = previous_metadata.get("pages_data", [])
+            if not isinstance(existing_pages, list):
+                raise RuntimeError("Cannot resume: metadata pages_data must be a list.")
+
         images_dir = book_dir / "images"
         images_dir.mkdir(exist_ok=True)
 
@@ -874,66 +958,158 @@ class ColoringBookGenerator:
         # Generate pages
         prompts = theme_data["prompts"]
         generated = []
+        accepted_hashes = set()
+        accepted_page_numbers = set()
+        for page_data in existing_pages:
+            if not isinstance(page_data, dict):
+                continue
+            page_number = page_data.get("page")
+            expected_name = (
+                f"page_{page_number:03d}.png"
+                if isinstance(page_number, int) and 1 <= page_number <= num_pages
+                else None
+            )
+            if (
+                expected_name is None
+                or page_data.get("file") != expected_name
+                or page_number in accepted_page_numbers
+            ):
+                continue
+            image_path = images_dir / expected_name
+            if not image_path.is_file():
+                continue
+            validation = validate_image_quality(
+                image_path,
+                check_binary=self.force_lineart,
+            )
+            if not validation["valid"] or print_safe_margin_issue(image_path):
+                continue
+            fingerprint = image_pixel_hash(image_path)
+            if fingerprint in accepted_hashes:
+                continue
+            accepted_hashes.add(fingerprint)
+            accepted_page_numbers.add(page_number)
+            generated.append(page_data)
+
+        def save_progress():
+            generated_page_numbers = {page["page"] for page in generated}
+            failed_pages = [
+                page_number
+                for page_number in range(1, num_pages + 1)
+                if page_number not in generated_page_numbers
+            ]
+            self._save_book_metadata(
+                book_dir,
+                title,
+                theme,
+                num_pages,
+                generated,
+                timestamp,
+                failed_pages=failed_pages,
+            )
+            return failed_pages
+
+        save_progress()
+        consecutive_provider_failures = 0
+        provider_unavailable = False
 
         for i in range(num_pages):
-            prompt = prompts[i % len(prompts)]
-
-            # Add variety using shared variations
-            prompt += random.choice(PROMPT_VARIATIONS)
-
-            logger.info(f"Generating page {i+1}/{num_pages}...")
-
+            if i + 1 in accepted_page_numbers:
+                continue
+            base_prompt = prompts[i % len(prompts)]
             image_path = images_dir / f"page_{i+1:03d}.png"
-            success = False
+            candidate_path = images_dir / f".page_{i+1:03d}_candidate.png"
+            accepted = False
 
-            # Generate image using centralized backend logic
-            image_bytes = self._generate_image_bytes(prompt, size=(1536, 1536))
-            if image_bytes:
-                # Post-process (upscale and/or convert to line art)
-                image_bytes = self._post_process_image(image_bytes)
-                image_path.write_bytes(image_bytes)
-                success = True
+            for attempt in range(1, MAX_PAGE_GENERATION_ATTEMPTS + 1):
+                prompt = base_prompt + random.choice(PROMPT_VARIATIONS)
+                if attempt > 1:
+                    prompt += (
+                        ", use a different pose and composition, keep the full subject "
+                        "inside a generous white margin, and do not draw a frame"
+                    )
 
-            if success:
-                # QUALITY ASSURANCE: Validate the generated image
-                validation = validate_image_quality(
-                    image_path,
-                    check_binary=self.force_lineart
+                logger.info(
+                    f"Generating page {i+1}/{num_pages} "
+                    f"(attempt {attempt}/{MAX_PAGE_GENERATION_ATTEMPTS})..."
                 )
+                image_bytes = self._generate_image_bytes(prompt, size=(1536, 1536))
+                if not image_bytes:
+                    consecutive_provider_failures += 1
+                    logger.warning(f"  ✗ No image returned for page {i+1}, attempt {attempt}")
+                    if consecutive_provider_failures >= MAX_PAGE_GENERATION_ATTEMPTS:
+                        provider_unavailable = True
+                        break
+                else:
+                    consecutive_provider_failures = 0
+                    try:
+                        candidate_path.write_bytes(self._post_process_image(image_bytes))
+                        validation = validate_image_quality(
+                            candidate_path,
+                            check_binary=self.force_lineart,
+                        )
+                        if not validation["valid"]:
+                            logger.warning(
+                                f"  ✗ Page {i+1} failed image validation: "
+                                f"{validation.get('issues', [])}"
+                            )
+                        else:
+                            margin_issue = print_safe_margin_issue(candidate_path)
+                            if margin_issue:
+                                logger.warning(f"  ✗ Page {i+1} rejected: {margin_issue}")
+                            else:
+                                fingerprint = image_pixel_hash(candidate_path)
+                                if fingerprint in accepted_hashes:
+                                    logger.warning(
+                                        f"  ✗ Page {i+1} rejected: duplicate artwork"
+                                    )
+                                else:
+                                    candidate_path.replace(image_path)
+                                    accepted_hashes.add(fingerprint)
+                                    generated.append({
+                                        "page": i + 1,
+                                        "prompt": prompt,
+                                        "file": image_path.name,
+                                        "quality_metrics": validation.get("metrics", {}),
+                                    })
+                                    accepted_page_numbers.add(i + 1)
+                                    accepted = True
+                                    logger.info(
+                                        f"  ✓ Saved unique, print-safe art: {image_path.name}"
+                                    )
+                    except (OSError, RuntimeError, ValueError) as error:
+                        logger.warning(f"  ✗ Page {i+1} attempt {attempt} failed: {error}")
+                    finally:
+                        if candidate_path.exists():
+                            candidate_path.unlink()
 
-                if not validation['valid']:
-                    logger.error(f"  ✗ Quality validation FAILED for {image_path.name}")
-                    for issue in validation.get('issues', []):
-                        logger.error(f"    - {issue}")
-                    logger.error("  This is a CRITICAL error - image will not print correctly!")
-                    # Don't add to generated list if validation fails critically
-                    success = False
-                elif validation.get('warnings'):
-                    logger.warning(f"  ⚠ Quality warnings for {image_path.name}:")
-                    for warning in validation['warnings']:
-                        logger.warning(f"    - {warning}")
+                if accepted or provider_unavailable:
+                    break
+                if attempt < MAX_PAGE_GENERATION_ATTEMPTS:
+                    time.sleep(RATE_LIMIT_DELAY_SECONDS)
 
-                if success:
-                    # Add metrics to metadata
-                    page_data = {
-                        "page": i + 1,
-                        "prompt": prompt,
-                        "file": str(image_path.name),
-                        "quality_metrics": validation.get('metrics', {})
-                    }
-                    generated.append(page_data)
-                    logger.info(f"  ✓ Saved and validated: {image_path.name}")
-            else:
-                logger.warning(f"  ✗ Failed to generate page {i+1}")
-
-            # Rate limiting
-            time.sleep(2)
+            if not accepted:
+                logger.error(
+                    f"  ✗ Could not create a unique, print-safe image for page {i+1}"
+                )
+            if provider_unavailable:
+                logger.error("Image provider failed repeatedly; stopping to avoid wasted requests.")
+                break
+            save_progress()
+            if i < num_pages - 1:
+                time.sleep(RATE_LIMIT_DELAY_SECONDS)
 
         # Save metadata using helper method
-        self._save_book_metadata(book_dir, title, theme, num_pages, generated, timestamp)
+        failed_pages = save_progress()
 
         logger.info(f"Generated {len(generated)}/{num_pages} pages")
         logger.info(f"Book saved to: {book_dir}")
+        if failed_pages:
+            raise RuntimeError(
+                f"Book incomplete: generated {len(generated)}/{num_pages} unique, "
+                f"print-safe pages. Missing pages: {failed_pages}. "
+                f"Partial output and diagnostics were retained at '{book_dir}'."
+            )
 
         return book_dir
 
@@ -949,46 +1125,95 @@ class ColoringBookGenerator:
             return None
 
         images_dir = book_dir / "images"
-        if not images_dir.exists():
-            logger.error(f"Images directory not found: {images_dir}")
-            return None
-
-        # Get all images
-        images = sorted(images_dir.glob("*.png"))
-        if not images:
-            logger.error("No images found")
-            return None
-
-        # Load metadata
         metadata_file = book_dir / "metadata.json"
-        if metadata_file.exists():
+        if not images_dir.exists():
+            raise RuntimeError(f"Images directory not found: {images_dir}")
+        if not metadata_file.exists():
+            raise RuntimeError(f"Book metadata is missing: {metadata_file}")
+
+        try:
             metadata = json.loads(metadata_file.read_text())
-            title = metadata.get("title", "Coloring Book")
-        else:
-            title = "Coloring Book"
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"Could not read book metadata: {error}") from error
+
+        expected_pages = metadata.get("pages")
+        generated_pages = metadata.get("generated")
+        pages_data = metadata.get("pages_data", [])
+        images = sorted(images_dir.glob("page_*.png"))
+        if (
+            not isinstance(expected_pages, int)
+            or expected_pages < 1
+            or not isinstance(pages_data, list)
+            or any(
+                not isinstance(page, dict) or not isinstance(page.get("file"), str)
+                for page in pages_data
+            )
+            or generated_pages != expected_pages
+            or len(pages_data) != expected_pages
+            or len(images) != expected_pages
+        ):
+            raise RuntimeError(
+                f"Refusing to compile an incomplete book: expected {expected_pages} "
+                f"pages, metadata records {generated_pages}, and {len(images)} image files."
+            )
+
+        recorded_files = [page.get("file") for page in pages_data]
+        if (
+            len(set(recorded_files)) != expected_pages
+            or set(recorded_files) != {image.name for image in images}
+        ):
+            raise RuntimeError("Book metadata does not match the generated image files.")
+
+        seen_hashes = {}
+        for image_path in images:
+            fingerprint = image_pixel_hash(image_path)
+            if fingerprint in seen_hashes:
+                raise RuntimeError(
+                    f"Refusing to compile duplicate artwork on "
+                    f"'{seen_hashes[fingerprint]}' and '{image_path.name}'."
+                )
+            seen_hashes[fingerprint] = image_path.name
+
+        for image_path in images:
+            validation = validate_image_quality(
+                image_path,
+                check_binary=self.force_lineart,
+            )
+            if not validation["valid"]:
+                raise RuntimeError(
+                    f"Refusing to compile invalid page '{image_path.name}': "
+                    f"{validation.get('issues', [])}"
+                )
+            margin_issue = print_safe_margin_issue(image_path)
+            if margin_issue:
+                raise RuntimeError(
+                    f"Refusing to compile unsafe page '{image_path.name}': {margin_issue}"
+                )
 
         # Create PDF
+        title = metadata.get("title", "Coloring Book")
         pdf_path = book_dir / f"{title.replace(' ', '_')}.pdf"
+        temporary_pdf = pdf_path.with_name(f".{pdf_path.stem}.tmp.pdf")
 
         # Use letter size for KDP
         page_width, page_height = letter
 
-        c = canvas.Canvas(str(pdf_path), pagesize=letter)
+        try:
+            c = canvas.Canvas(str(temporary_pdf), pagesize=letter)
 
-        # Add title page
-        c.setFont("Helvetica-Bold", 36)
-        c.drawCentredString(page_width/2, page_height/2 + 50, title)
-        c.setFont("Helvetica", 18)
-        c.drawCentredString(page_width/2, page_height/2 - 20, "Adult Coloring Book")
-        c.showPage()
+            # Add title page
+            c.setFont("Helvetica-Bold", 36)
+            c.drawCentredString(page_width/2, page_height/2 + 50, title)
+            c.setFont("Helvetica", 18)
+            c.drawCentredString(page_width/2, page_height/2 - 20, "Adult Coloring Book")
+            c.showPage()
 
-        # Add coloring pages
-        margin = 0.5 * inch
-        content_width = page_width - 2 * margin
-        content_height = page_height - 2 * margin
+            # Add coloring pages
+            margin = 0.5 * inch
+            content_width = page_width - 2 * margin
+            content_height = page_height - 2 * margin
 
-        for img_path in images:
-            try:
+            for img_path in images:
                 img = Image.open(img_path)
                 img_width, img_height = img.size
 
@@ -1003,11 +1228,11 @@ class ColoringBookGenerator:
 
                 c.drawImage(str(img_path), x, y, new_width, new_height)
                 c.showPage()
-
-            except Exception as e:
-                logger.error(f"Error adding {img_path}: {e}")
-
-        c.save()
+            c.save()
+            temporary_pdf.replace(pdf_path)
+        finally:
+            if temporary_pdf.exists():
+                temporary_pdf.unlink()
         logger.info(f"PDF created: {pdf_path}")
 
         return pdf_path
@@ -1028,6 +1253,8 @@ def main():
                        help="Output directory")
     parser.add_argument("--pdf", action="store_true",
                        help="Also create PDF")
+    parser.add_argument("--resume", type=str, default=None,
+                       help="Resume a matching incomplete book directory")
     parser.add_argument("--list-themes", action="store_true",
                        help="List available themes")
     parser.add_argument("--backend", choices=["pollinations", "huggingface", "replicate"], default="pollinations",
@@ -1060,7 +1287,8 @@ def main():
     book_dir = generator.generate_book(
         theme=args.theme,
         num_pages=args.pages,
-        book_title=args.title
+        book_title=args.title,
+        resume_from=args.resume,
     )
 
     if args.pdf and book_dir:

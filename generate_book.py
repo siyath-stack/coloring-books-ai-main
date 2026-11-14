@@ -350,6 +350,18 @@ def line_art_quality_issues(gray_pil_img):
         if largest_component_ratio > 0.08:
             issues.append("image contains a large solid black region")
 
+        solid_mark_area_limit = max(256, int(ink.size * 0.0015))
+        for component in range(1, component_count):
+            x, y, component_width, component_height, area = component_stats[component]
+            bounding_area = component_width * component_height
+            if (
+                area >= solid_mark_area_limit
+                and bounding_area
+                and area / bounding_area > 0.55
+            ):
+                issues.append("image contains an oversized solid black mark")
+                break
+
         speck_area_limit = max(6, int(ink.size * 0.00001))
         speck_count = int(np.count_nonzero(component_areas <= speck_area_limit))
         speck_count_limit = max(18, int(ink.size * 18 / (768 * 768)))
@@ -885,6 +897,7 @@ def generate_vector_interior_page(character_dna, scene_data, page_num):
         f"Composition: {composition or 'a clear, balanced layout suited to the scene'}. "
         "Represent the stated action literally and make it unmistakable at a glance. Use one single scene, not a collage, circular frame, halo, badge, or corner vignette. "
         "Make the main animal the large, recognizable focal character, fully visible and doing the stated action. "
+        "Keep its face visible and recognizable, with clear eyes, a nose, and a simple mouth; do not show it from behind or hide its face. "
         "Include only one or two large, simple objects or scenery details named in the scene; keep them separate and easy to color. "
         "Vary the pose, viewpoint, and arrangement to match this page's specific story rather than using a generic animal portrait. "
         "Draw smooth, clean black outlines with simple facial and body-separation lines; avoid speckles, stray marks, and fragmented strokes. "
@@ -931,6 +944,11 @@ def generate_vector_interior_page(character_dna, scene_data, page_num):
                 prompt += (
                     " Remove every stray dot and speck. Keep the outlines smooth and continuous, "
                     "with no scattered marks or fragments anywhere in the white background."
+                )
+            if "image contains an oversized solid black mark" in issues:
+                prompt += (
+                    " Remove all solid black blobs and smudges. Use thin black outlines only; "
+                    "keep every interior white except for tiny facial details."
                 )
             if "character or prop is cropped" in issues or "artwork touches the page edge" in issues:
                 if attempt == 1:

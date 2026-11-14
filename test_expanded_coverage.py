@@ -27,6 +27,7 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image, ImageDraw
 
+import coloring_book_generator
 # Import main module
 from coloring_book_generator import (
     ColoringBookGenerator,
@@ -810,6 +811,18 @@ class TestInteriorLineArtQuality:
         print("  ✓ Large solid fill is rejected even below the overall ink limit")
         return True
 
+    def test_quality_check_rejects_localized_black_smudges(self):
+        image = Image.new("L", (768, 768), "white")
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((190, 310, 285, 332), radius=8, fill="black")
+        draw.ellipse((470, 440, 510, 458), fill="black")
+
+        assert float(np.mean(np.asarray(image) <= 140)) < 0.35
+        issues = line_art_quality_issues(image)
+        assert "image contains an oversized solid black mark" in issues, issues
+        print("  ✓ Localized black smudges are rejected")
+        return True
+
     def test_filled_generation_is_repaired_without_extra_requests(self):
         image = Image.new("L", (768, 768), "white")
         ImageDraw.Draw(image).ellipse((120, 80, 650, 690), fill="black")
@@ -1056,6 +1069,187 @@ class TestErrorHandling:
             return True
 
 
+class TestBookCompleteness:
+    def test_artwork_near_page_edge_is_rejected(self):
+        image = Image.new("L", (100, 100), "white")
+        ImageDraw.Draw(image).rectangle((1, 10, 90, 90), outline="black", width=2)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "edge-art.png"
+            image.save(path)
+            issue = coloring_book_generator.print_safe_margin_issue(path)
+
+        assert issue and "trim-safe margin" in issue
+        print("  ✓ Artwork touching the trim-safe margin is rejected")
+        return True
+
+    def test_generation_retries_duplicates_and_keeps_incomplete_metadata(self):
+        image = Image.new("L", (2550, 3300), "white")
+        ImageDraw.Draw(image).ellipse((200, 200, 2350, 3100), outline="black", width=18)
+        encoded = BytesIO()
+        image.save(encoded, format="PNG", dpi=(300, 300))
+        page_bytes = encoded.getvalue()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            generator = ColoringBookGenerator(
+                output_dir=temp_dir,
+                backend="pollinations",
+                force_lineart=True,
+            )
+            with patch("coloring_book_generator.preflight_checks", return_value=True), \
+                    patch.object(generator, "_generate_image_bytes", return_value=b"raw") as generate, \
+                    patch.object(generator, "_post_process_image", return_value=page_bytes), \
+                    patch("coloring_book_generator.time.sleep"):
+                try:
+                    generator.generate_book(
+                        "animals",
+                        num_pages=2,
+                        book_title="Duplicate Test",
+                    )
+                except RuntimeError as error:
+                    assert "Book incomplete" in str(error)
+                else:
+                    raise AssertionError("A duplicate-filled partial book must not report success")
+
+            book_dirs = list(Path(temp_dir).glob("Duplicate_Test_*"))
+            assert len(book_dirs) == 1
+            metadata = json.loads((book_dirs[0] / "metadata.json").read_text())
+            assert metadata["generated"] == 1
+            assert metadata["failed_pages"] == [2]
+            assert len(list((book_dirs[0] / "images").glob("*.png"))) == 1
+            assert not list(book_dirs[0].glob("*.pdf"))
+            assert generate.call_count == (
+                1 + coloring_book_generator.MAX_PAGE_GENERATION_ATTEMPTS
+            )
+        print("  ✓ Duplicate pages are retried and partial books remain unpublished")
+        return True
+
+    def test_pdf_refuses_incomplete_book(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            book_dir = Path(temp_dir)
+            images_dir = book_dir / "images"
+            images_dir.mkdir()
+            Image.new("L", (32, 32), "white").save(images_dir / "page_001.png")
+            metadata = {
+                "title": "Incomplete",
+                "pages": 30,
+                "generated": 1,
+                "pages_data": [{"page": 1, "file": "page_001.png"}],
+            }
+            (book_dir / "metadata.json").write_text(json.dumps(metadata))
+
+            try:
+                ColoringBookGenerator().create_pdf(book_dir)
+            except RuntimeError as error:
+                assert "incomplete book" in str(error).casefold()
+            else:
+                raise AssertionError("PDF compilation must reject missing pages")
+
+            assert not list(book_dir.glob("*.pdf"))
+        print("  ✓ PDF compilation refuses incomplete books")
+        return True
+
+    def test_pdf_refuses_duplicate_images(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            book_dir = Path(temp_dir)
+            images_dir = book_dir / "images"
+            images_dir.mkdir()
+            image = Image.new("L", (32, 32), "white")
+            ImageDraw.Draw(image).ellipse((6, 6, 26, 26), outline="black", width=2)
+            image.save(images_dir / "page_001.png")
+            image.save(images_dir / "page_002.png")
+            metadata = {
+                "title": "Duplicate",
+                "pages": 2,
+                "generated": 2,
+                "pages_data": [
+                    {"page": 1, "file": "page_001.png"},
+                    {"page": 2, "file": "page_002.png"},
+                ],
+            }
+            (book_dir / "metadata.json").write_text(json.dumps(metadata))
+
+            try:
+                ColoringBookGenerator().create_pdf(book_dir)
+            except RuntimeError as error:
+                assert "duplicate artwork" in str(error).casefold()
+            else:
+                raise AssertionError("PDF compilation must reject duplicate artwork")
+
+            assert not list(book_dir.glob("*.pdf"))
+        print("  ✓ PDF compilation refuses exact duplicate illustrations")
+        return True
+
+    def test_resume_finishes_book_and_builds_pdf(self):
+        first_page = Image.new("L", (2550, 3300), "white")
+        ImageDraw.Draw(first_page).ellipse(
+            (250, 300, 2300, 3000),
+            outline="black",
+            width=18,
+        )
+        first_bytes = BytesIO()
+        first_page.save(first_bytes, format="PNG", dpi=(300, 300))
+
+        second_page = Image.new("L", (2550, 3300), "white")
+        ImageDraw.Draw(second_page).polygon(
+            ((1275, 250), (2250, 3000), (300, 3000)),
+            outline="black",
+            width=18,
+        )
+        second_bytes = BytesIO()
+        second_page.save(second_bytes, format="PNG", dpi=(300, 300))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            book_dir = Path(temp_dir) / "resume-book"
+            images_dir = book_dir / "images"
+            images_dir.mkdir(parents=True)
+            (images_dir / "page_001.png").write_bytes(first_bytes.getvalue())
+            metadata = {
+                "title": "Resume Test",
+                "theme": "animals",
+                "pages": 2,
+                "generated": 1,
+                "failed_pages": [2],
+                "timestamp": "test-run",
+                "pages_data": [
+                    {
+                        "page": 1,
+                        "prompt": "existing page",
+                        "file": "page_001.png",
+                        "quality_metrics": {},
+                    }
+                ],
+            }
+            (book_dir / "metadata.json").write_text(json.dumps(metadata))
+            generator = ColoringBookGenerator(force_lineart=True)
+
+            with patch("coloring_book_generator.preflight_checks", return_value=True), \
+                    patch.object(generator, "_generate_image_bytes", return_value=b"raw") as generate, \
+                    patch.object(
+                        generator,
+                        "_post_process_image",
+                        return_value=second_bytes.getvalue(),
+                    ), \
+                    patch("coloring_book_generator.time.sleep"):
+                result_dir = generator.generate_book(
+                    "animals",
+                    num_pages=2,
+                    book_title="Resume Test",
+                    resume_from=book_dir,
+                )
+
+            pdf_path = generator.create_pdf(result_dir)
+            final_metadata = json.loads((book_dir / "metadata.json").read_text())
+
+            assert generate.call_count == 1
+            assert final_metadata["generated"] == 2
+            assert final_metadata["failed_pages"] == []
+            assert pdf_path.is_file()
+            assert b"/Count 3" in pdf_path.read_bytes()
+        print("  ✓ Resume reuses valid pages and produces a complete PDF")
+        return True
+
+
 class TestImageValidation:
     """Test image quality validation function."""
 
@@ -1246,6 +1440,7 @@ def run_all_tests():
     results.append(("Remove circular halo", interior_tests.test_circular_halo_is_removed_entirely()))
     results.append(("Clean storybook backdrop noise", interior_tests.test_circular_backdrop_and_detached_specks_are_removed()))
     results.append(("Reject localized solid fill", interior_tests.test_quality_check_rejects_large_fill_below_ink_limit()))
+    results.append(("Reject localized black smudges", interior_tests.test_quality_check_rejects_localized_black_smudges()))
     results.append(("Repair without extra requests", interior_tests.test_filled_generation_is_repaired_without_extra_requests()))
     results.append(("Illustrate distinct story scenes", interior_tests.test_story_scene_details_reach_the_image_prompt()))
     results.append(("Unique fallback story pages", interior_tests.test_fallback_plan_has_distinct_story_beats()))
@@ -1270,6 +1465,12 @@ def run_all_tests():
     results.append(("Invalid theme", error_tests.test_invalid_theme()))
     results.append(("Corrupt image", error_tests.test_corrupt_image_upscaling()))
     results.append(("Zero pages", error_tests.test_zero_pages()))
+    book_tests = TestBookCompleteness()
+    results.append(("Trim-safe page margins", book_tests.test_artwork_near_page_edge_is_rejected()))
+    results.append(("Retry duplicate pages", book_tests.test_generation_retries_duplicates_and_keeps_incomplete_metadata()))
+    results.append(("Reject incomplete PDFs", book_tests.test_pdf_refuses_incomplete_book()))
+    results.append(("Reject duplicate PDFs", book_tests.test_pdf_refuses_duplicate_images()))
+    results.append(("Resume complete book", book_tests.test_resume_finishes_book_and_builds_pdf()))
 
     # Image validation
     print("\n" + "=" * 70)
