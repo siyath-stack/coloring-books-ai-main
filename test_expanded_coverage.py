@@ -1124,6 +1124,59 @@ class TestBookCompleteness:
         print("  ✓ Duplicate pages are retried and partial books remain unpublished")
         return True
 
+    def test_generation_retries_near_duplicate_artwork(self):
+        first_page = Image.new("L", (2550, 3300), "white")
+        ImageDraw.Draw(first_page).ellipse((250, 250, 2300, 3000), outline="black", width=18)
+        first_bytes = BytesIO()
+        first_page.save(first_bytes, format="PNG", dpi=(300, 300))
+
+        near_duplicate = first_page.copy()
+        ImageDraw.Draw(near_duplicate).ellipse((1200, 1600, 1212, 1612), fill="black")
+        near_bytes = BytesIO()
+        near_duplicate.save(near_bytes, format="PNG", dpi=(300, 300))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            generator = ColoringBookGenerator(
+                output_dir=temp_dir,
+                backend="pollinations",
+                force_lineart=True,
+            )
+            with patch("coloring_book_generator.preflight_checks", return_value=True), \
+                    patch.object(
+                        generator,
+                        "_generate_image_bytes",
+                        return_value=b"raw",
+                    ) as generate, \
+                    patch.object(
+                        generator,
+                        "_post_process_image",
+                        side_effect=[
+                            first_bytes.getvalue(),
+                            near_bytes.getvalue(),
+                            near_bytes.getvalue(),
+                            near_bytes.getvalue(),
+                        ],
+                    ), \
+                    patch("coloring_book_generator.time.sleep"):
+                try:
+                    generator.generate_book(
+                        "animals",
+                        num_pages=2,
+                        book_title="Near Duplicate Test",
+                    )
+                except RuntimeError as error:
+                    assert "Book incomplete" in str(error)
+                else:
+                    raise AssertionError("Near-duplicate artwork must be rejected")
+
+            book_dir = next(Path(temp_dir).glob("Near_Duplicate_Test_*"))
+            metadata = json.loads((book_dir / "metadata.json").read_text())
+            assert metadata["generated"] == 1
+            assert metadata["failed_pages"] == [2]
+            assert generate.call_count == 1 + coloring_book_generator.MAX_PAGE_GENERATION_ATTEMPTS
+        print("  ✓ Near-duplicate art is retried and excluded from incomplete books")
+        return True
+
     def test_pdf_refuses_incomplete_book(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             book_dir = Path(temp_dir)
@@ -1178,6 +1231,46 @@ class TestBookCompleteness:
 
             assert not list(book_dir.glob("*.pdf"))
         print("  ✓ PDF compilation refuses exact duplicate illustrations")
+        return True
+
+    def test_pdf_refuses_near_duplicate_images(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            book_dir = Path(temp_dir)
+            images_dir = book_dir / "images"
+            images_dir.mkdir()
+            image = Image.new("L", (64, 64), "white")
+            ImageDraw.Draw(image).ellipse((8, 8, 56, 56), outline="black", width=3)
+            image.save(images_dir / "page_001.png")
+            changed = image.copy()
+            ImageDraw.Draw(changed).ellipse((31, 31, 33, 33), fill="black")
+            changed.save(images_dir / "page_002.png")
+            metadata = {
+                "title": "Near Duplicate",
+                "pages": 2,
+                "generated": 2,
+                "pages_data": [
+                    {"page": 1, "file": "page_001.png"},
+                    {"page": 2, "file": "page_002.png"},
+                ],
+            }
+            (book_dir / "metadata.json").write_text(json.dumps(metadata))
+
+            assert coloring_book_generator.image_pixel_hash(
+                images_dir / "page_001.png"
+            ) != coloring_book_generator.image_pixel_hash(images_dir / "page_002.png")
+            assert coloring_book_generator.layout_signatures_are_similar(
+                coloring_book_generator.image_layout_signature(images_dir / "page_001.png"),
+                coloring_book_generator.image_layout_signature(images_dir / "page_002.png"),
+            )
+            try:
+                ColoringBookGenerator().create_pdf(book_dir)
+            except RuntimeError as error:
+                assert "near-duplicate artwork" in str(error).casefold()
+            else:
+                raise AssertionError("PDF compilation must reject near-duplicate artwork")
+
+            assert not list(book_dir.glob("*.pdf"))
+        print("  ✓ PDF compilation refuses visually near-duplicate illustrations")
         return True
 
     def test_resume_finishes_book_and_builds_pdf(self):
@@ -1468,8 +1561,10 @@ def run_all_tests():
     book_tests = TestBookCompleteness()
     results.append(("Trim-safe page margins", book_tests.test_artwork_near_page_edge_is_rejected()))
     results.append(("Retry duplicate pages", book_tests.test_generation_retries_duplicates_and_keeps_incomplete_metadata()))
+    results.append(("Retry near-duplicate pages", book_tests.test_generation_retries_near_duplicate_artwork()))
     results.append(("Reject incomplete PDFs", book_tests.test_pdf_refuses_incomplete_book()))
     results.append(("Reject duplicate PDFs", book_tests.test_pdf_refuses_duplicate_images()))
+    results.append(("Reject near-duplicate PDFs", book_tests.test_pdf_refuses_near_duplicate_images()))
     results.append(("Resume complete book", book_tests.test_resume_finishes_book_and_builds_pdf()))
 
     # Image validation

@@ -40,6 +40,7 @@ MAX_FILE_SIZE_BYTES = 10_000_000  # 10MB - larger may cause upload issues
 RATE_LIMIT_DELAY_SECONDS = 2  # Delay between API calls to avoid rate limiting
 MAX_PAGE_GENERATION_ATTEMPTS = 3
 PRINT_SAFE_MARGIN_FRACTION = 0.02
+NEAR_DUPLICATE_MAX_DIFFERENCE = 0.003
 
 # Prompt Variations (shared between generators)
 PROMPT_VARIATIONS = [
@@ -329,6 +330,40 @@ def image_pixel_hash(image_path: Path) -> str:
         normalized = image.convert("L")
         content = f"{normalized.width}x{normalized.height}".encode("ascii")
         return hashlib.sha256(content + normalized.tobytes()).hexdigest()
+
+
+def image_layout_signature(image_path: Path) -> bytes:
+    """Create a compact low-resolution signature for near-duplicate detection."""
+    import numpy as np
+    from PIL import Image
+
+    with Image.open(image_path) as image:
+        thumbnail = image.convert("L").resize((64, 64), Image.Resampling.LANCZOS)
+        ink = np.asarray(thumbnail) < 140
+    return np.packbits(ink).tobytes()
+
+
+def layout_signatures_are_similar(
+    first: bytes,
+    second: bytes,
+    max_difference: float = NEAR_DUPLICATE_MAX_DIFFERENCE,
+) -> bool:
+    """Compare downsampled line-art layouts while tolerating tiny pixel changes."""
+    import numpy as np
+
+    if len(first) != len(second):
+        return False
+    different_pixels = int(
+        np.count_nonzero(
+            np.unpackbits(
+                np.bitwise_xor(
+                    np.frombuffer(first, dtype=np.uint8),
+                    np.frombuffer(second, dtype=np.uint8),
+                )
+            )
+        )
+    )
+    return different_pixels <= int(64 * 64 * max_difference)
 
 
 def print_safe_margin_issue(
@@ -959,6 +994,7 @@ class ColoringBookGenerator:
         prompts = theme_data["prompts"]
         generated = []
         accepted_hashes = set()
+        accepted_layout_signatures = []
         accepted_page_numbers = set()
         for page_data in existing_pages:
             if not isinstance(page_data, dict):
@@ -987,7 +1023,14 @@ class ColoringBookGenerator:
             fingerprint = image_pixel_hash(image_path)
             if fingerprint in accepted_hashes:
                 continue
+            layout_signature = image_layout_signature(image_path)
+            if any(
+                layout_signatures_are_similar(layout_signature, accepted_signature)
+                for accepted_signature in accepted_layout_signatures
+            ):
+                continue
             accepted_hashes.add(fingerprint)
+            accepted_layout_signatures.append(layout_signature)
             accepted_page_numbers.add(page_number)
             generated.append(page_data)
 
@@ -1059,13 +1102,24 @@ class ColoringBookGenerator:
                                 logger.warning(f"  ✗ Page {i+1} rejected: {margin_issue}")
                             else:
                                 fingerprint = image_pixel_hash(candidate_path)
+                                layout_signature = image_layout_signature(candidate_path)
                                 if fingerprint in accepted_hashes:
                                     logger.warning(
                                         f"  ✗ Page {i+1} rejected: duplicate artwork"
                                     )
+                                elif any(
+                                    layout_signatures_are_similar(
+                                        layout_signature, accepted_signature
+                                    )
+                                    for accepted_signature in accepted_layout_signatures
+                                ):
+                                    logger.warning(
+                                        f"  ✗ Page {i+1} rejected: near-duplicate artwork"
+                                    )
                                 else:
                                     candidate_path.replace(image_path)
                                     accepted_hashes.add(fingerprint)
+                                    accepted_layout_signatures.append(layout_signature)
                                     generated.append({
                                         "page": i + 1,
                                         "prompt": prompt,
@@ -1165,6 +1219,7 @@ class ColoringBookGenerator:
             raise RuntimeError("Book metadata does not match the generated image files.")
 
         seen_hashes = {}
+        seen_layout_signatures = []
         for image_path in images:
             fingerprint = image_pixel_hash(image_path)
             if fingerprint in seen_hashes:
@@ -1173,6 +1228,14 @@ class ColoringBookGenerator:
                     f"'{seen_hashes[fingerprint]}' and '{image_path.name}'."
                 )
             seen_hashes[fingerprint] = image_path.name
+            layout_signature = image_layout_signature(image_path)
+            for other_name, other_signature in seen_layout_signatures:
+                if layout_signatures_are_similar(layout_signature, other_signature):
+                    raise RuntimeError(
+                        f"Refusing to compile near-duplicate artwork on "
+                        f"'{other_name}' and '{image_path.name}'."
+                    )
+            seen_layout_signatures.append((image_path.name, layout_signature))
 
         for image_path in images:
             validation = validate_image_quality(

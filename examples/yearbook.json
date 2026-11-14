@@ -1,0 +1,33 @@
+{
+  "title": "Our Yearbook",
+  "school": "Your School",
+  "year": "2025-2026",
+  "cover_photo": null,
+  "sections": [
+    {
+      "title": "Class Memories",
+      "entries": [
+        {
+          "name": "Student Name",
+          "caption": "Add a favorite memory here.",
+          "photo": null
+        },
+        {
+          "name": "Another Student",
+          "caption": "Add a short caption here.",
+          "photo": null
+        }
+      ]
+    },
+    {
+      "title": "Special Moments",
+      "entries": [
+        {
+          "name": "Field Trip",
+          "caption": "Write about a moment everyone remembers.",
+          "photo": null
+        }
+      ]
+    }
+  ]
+}

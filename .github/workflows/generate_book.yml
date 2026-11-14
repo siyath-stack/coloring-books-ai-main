@@ -1,49 +1,47 @@
-name: Generate Daily Coloring Book PDF
+name: Create Journal and Yearbook Samples
 
 'on':
   workflow_dispatch:
-  schedule:
-    - cron: '0 8 * * *'
 
 jobs:
-  build-coloring-book:
+  create-samples:
     runs-on: ubuntu-latest
-    env:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
     steps:
-      - name: Check out Repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
 
-      - name: Install System Fonts and Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-dejavu-core fonts-liberation libgl1
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+      - name: Install PDF dependencies
+        run: python -m pip install Pillow reportlab
 
-      - name: Generate Daily Book Plan
-        run: python research_trend.py
+      - name: Run journal and yearbook tests
+        run: python -m unittest -v test_journal_yearbook_creator
 
-      - name: Generate Pages and Compile PDF
-        run: python generate_book.py
+      - name: Create sample journal
+        run: >-
+          python journal_yearbook_creator.py
+          --type journal
+          --title "Sample Journal"
+          --pages 5
+          --output output
 
-      - name: Upload Book Run Output
+      - name: Create sample yearbook
+        run: >-
+          python journal_yearbook_creator.py
+          --type yearbook
+          --data examples/yearbook.json
+          --output output
+
+      - name: Upload sample PDFs
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: coloring-book-run-output
+          name: journal-yearbook-samples
           path: |
-            *.pdf
-            daily_book_plan.json
-          if-no-files-found: warn
+            output/Journal_*/*.pdf
+            output/Yearbook_*/*.pdf
+          if-no-files-found: error
           retention-days: 14

@@ -1,148 +1,106 @@
-# Adult Coloring Book Generator for Amazon KDP
+# Journal and Yearbook Creator
 
-AI-powered generator for creating **professional, print-ready** adult coloring books with **clean black-and-white line art**.
+Create print-ready guided journals and photo yearbooks as PDFs. These workflows
+run locally and do not call an image-generation service.
 
-## ✨ Clean, Simple Coloring-Page Style
+## What it creates
 
-All themes and image backends now use the same style direction:
-- ✅ **Pure black lines on white background** (no gray tones)
-- ✅ **Thick, smooth outlines and large open shapes**
-- ✅ **Centered subjects with minimal background detail**
-- ✅ **Professional print quality** at 300 DPI
-- ✅ **100% FREE** using Pollinations.ai (no API keys!)
+- **Journal**: a cover, an ownership page, and repeatable daily reflection pages
+  with room to write.
+- **Yearbook**: a cover and photo-card pages with names and captions. Supply
+  your own photos, or leave photo fields empty to get printable placeholders.
 
-## Features
+Both formats use US Letter pages. PDFs use vector text and lines; yearbook photos
+are placed without distortion.
 
-- **17 Family-Friendly Themes**: Mandalas, Animals, Nature, Geometric, Fantasy, Patterns, Inspirational, and more
-- **Enhanced Line Art Processing**: 3 quality levels (Enhanced, Standard, Detailed)
-- **Multiple AI Backends**: Pollinations (free), HuggingFace (free), Replicate (paid)
-- **KDP Ready**: Creates print-ready PDFs at 300 DPI
-- **Batch Mode**: Generate multiple books automatically
-
-## Quick Start
+## Setup
 
 ```bash
-# Install dependencies (see SETUP_GUIDE.md for details)
-pip install -r requirements.txt
-
-# Quick test - generate 1 sample page
-python test_improved_lineart.py --quick
-
-# Generate a clean, simple coloring book
-python coloring_book_generator.py \
-  --theme mandalas \
-  --pages 30 \
-  --lineart-method enhanced \
-  --pdf
-
-# List all available themes
-python coloring_book_generator.py --list-themes
+python -m pip install Pillow reportlab
 ```
 
-The daily book workflow uses Cloudflare for illustrations and automatically
-switches to Pollinations if Cloudflare's daily image quota is exhausted. If
-neither image service is available, the workflow stops without creating an
-incomplete PDF.
+The journal/yearbook creator only needs Pillow and ReportLab. Install
+`requirements.txt` if you also plan to run the legacy coloring-book tools.
 
-Each daily book follows a 30-page story arc. Pages vary the character's action,
-setting, composition, and caption while keeping the illustrations simple and
-easy to color.
-
-Interior pages that remain too close to the image edge after three generation
-attempts are scaled down and centered on a white canvas when the resulting page
-passes the line-art quality checks.
-
-## Themes
-
-| Theme | Description | Example Prompts |
-|-------|-------------|-----------------|
-| `mandalas` | Mystical Mandalas | Geometric, floral, celestial patterns |
-| `animals` | Enchanted Animals | Decorated lions, owls, elephants, wolves |
-| `nature` | Botanical Gardens | Flowers, forests, underwater scenes |
-| `geometric` | Sacred Geometry | Tessellations, optical illusions, 3D patterns |
-| `fantasy` | Fantasy Realms | Dragons, fairies, mermaids, unicorns |
-| `patterns` | Relaxing Patterns | Paisley, zentangle, damask, art nouveau |
-| `inspirational` | Mindful Words | Decorated text: BREATHE, PEACE, LOVE |
-
-## KDP Specifications
-
-- **Interior**: 8.5 x 11 inches (letter size)
-- **Resolution**: 300 DPI
-- **Format**: PDF
-- **Paper**: White or cream (your choice at upload)
-
-## Batch Generation
+## Create a journal
 
 ```bash
-# Generate all themes
-python batch_generator.py --all-themes --pages 30
-
-# Generate specific themes
-python batch_generator.py --themes mandalas animals nature --pages 40
+python journal_yearbook_creator.py \
+  --type journal \
+  --title "A Year of Ideas" \
+  --author "Your Name" \
+  --pages 60
 ```
 
-## 🛠️ Available Tools
+The page count is for writing pages; the PDF also includes a cover and an
+ownership page.
 
-| Script | Purpose | Use Case |
-|--------|---------|----------|
-| **[complete_book_workflow.py](complete_book_workflow.py)** | All-in-one solution | Create complete book ready for KDP |
-| **[coloring_book_generator.py](coloring_book_generator.py)** | Main generator | Generate individual books |
-| **[batch_generator.py](batch_generator.py)** | Batch processing | Generate multiple books at once |
-| **[cover_generator.py](cover_generator.py)** | Cover creation | Generate professional book covers |
-| **[test_improved_lineart.py](test_improved_lineart.py)** | Quality testing | Test line art conversion |
+## Create a yearbook
 
-## 📖 Complete Documentation
+Start with the included editable example:
 
-- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Command reference and common workflows
-- **[IMPROVEMENTS.md](IMPROVEMENTS.md)** - Complete usage guide and examples
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Installation instructions
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history and technical details
-
-## Output Structure
-
-```
-output/
-└── Book_Title_YYYYMMDD_HHMMSS/
-    ├── images/
-    │   ├── page_001.png
-    │   ├── page_002.png
-    │   └── ...
-    ├── cover/
-    │   └── cover_theme_Title.png
-    ├── metadata.json
-    └── Book_Title.pdf
+```bash
+python journal_yearbook_creator.py \
+  --type yearbook \
+  --data examples/yearbook.json
 ```
 
-## Documentation
+Edit the JSON to add people, captions, and photos. Photo paths are relative to
+the JSON file. For example:
 
-- **[IMPROVEMENTS.md](IMPROVEMENTS.md)** - Complete usage guide and examples
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Installation instructions
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history and technical details
+```json
+{
+  "title": "Our Yearbook",
+  "school": "Your School",
+  "year": "2025-2026",
+  "cover_photo": "photos/cover.jpg",
+  "sections": [
+    {
+      "title": "Class Memories",
+      "entries": [
+        {
+          "name": "Student Name",
+          "caption": "A favorite moment from the year.",
+          "photo": "photos/student.jpg"
+        }
+      ]
+    }
+  ]
+}
+```
 
-## Requirements
+Each section can have any number of entries. The creator lays them out four per
+page and reports missing or unreadable photo files instead of silently omitting
+them. Leave a `photo` value as `null` to create a blank photo box.
 
-- Python 3.8+
-- OpenCV 4.8+ (`opencv-python`)
-- NumPy 1.24+
-- Pillow 9.0+
-- ReportLab 4.0+
+```bash
+python journal_yearbook_creator.py \
+  --type yearbook \
+  --data path/to/yearbook.json \
+  --title "Class of 2026"
+```
 
-**No API keys required!** The default backend (Pollinations.ai) is completely free.
+## Output
 
-Optional backends:
-- **HuggingFace**: Free (rate limited) - Set `HF_TOKEN`
-- **Replicate**: ~$0.01-0.02/page - Set `REPLICATE_API_TOKEN`
+Each run creates a timestamped folder under `output/` containing the PDF and a
+`metadata.json` summary. Pass `--output PATH` to use a different output folder.
+Use `--help` for all command options.
 
-## What's New in v2.0
+## Tests
 
-🎨 **Clean black-and-white line art** with print-ready processing
-🆓 **100% free generation** using Pollinations.ai
-📚 **Improved documentation** with detailed guides
-🧹 **Family-friendly themes** only (removed controversial content)
-⚙️ **Better CLI** with more options and control
+```bash
+python -m unittest -v test_journal_yearbook_creator
+```
 
-See [CHANGELOG.md](CHANGELOG.md) for full details.
+## Legacy coloring-book tools
 
-## License
+The original coloring-book scripts remain available, but are no longer the
+project's default workflow:
 
-MIT - Free for commercial use on Amazon KDP
+- `coloring_book_generator.py` — image-backed coloring-book generation
+- `complete_book_workflow.py` — legacy end-to-end coloring-book workflow
+- `generate_book.py` — storybook generation
+- `batch_generator.py` — batch coloring-book generation
+
+Those tools may require external image providers and their own credentials or
+quotas. Journal and yearbook creation do not use them.
