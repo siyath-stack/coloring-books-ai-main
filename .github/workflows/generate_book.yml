@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
@@ -36,10 +37,13 @@ jobs:
       - name: Generate Pages and Compile PDF
         run: python generate_book.py
 
-      - name: Upload PDF Artifact
+      - name: Upload Book Run Output
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: compiled-coloring-book-pdf
-          path: '*.pdf'
-          if-no-files-found: error
+          name: coloring-book-run-output
+          path: |
+            *.pdf
+            daily_book_plan.json
+          if-no-files-found: warn
           retention-days: 14

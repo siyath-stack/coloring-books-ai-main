@@ -22,6 +22,7 @@ from pathlib import Path
 from contextlib import redirect_stdout
 from io import BytesIO
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 import numpy as np
 from PIL import Image, ImageDraw
@@ -52,7 +53,13 @@ from generate_book import (
     remove_isolated_specks,
     main,
 )
-from research_trend import DailyBookPlan, generate_fallback_plan, has_distinct_story_scenes
+import research_trend
+from research_trend import (
+    DailyBookPlan,
+    generate_daily_plan,
+    generate_fallback_plan,
+    has_distinct_story_scenes,
+)
 
 
 def create_test_image(width=768, height=768, color=(255, 255, 255)):
@@ -819,6 +826,61 @@ class TestInteriorLineArtQuality:
         return True
 
 
+class TestDailyPlan:
+    def test_sea_otter_fallback_matches_its_habitat(self):
+        plan = DailyBookPlan.model_validate(generate_fallback_plan([
+            "Barnaby the Baby Capybara",
+            "Hamish the Baby Highland Calf",
+        ]))
+
+        assert plan.subject == "Pip the Playful Sea Otter Pup"
+        story_text = " ".join(
+            getattr(scene, field)
+            for scene in plan.scenes
+            for field in ("action", "setting", "micro_prompt")
+        ).casefold()
+        assert any(term in story_text for term in ("kelp", "tide pool", "clam", "shore"))
+        assert not any(term in story_text for term in ("garden", "seed", "sunflower", "watering can"))
+        assert has_distinct_story_scenes(plan.scenes)
+        print("  ✓ Sea otter fallback scenes stay in a distinct coastal story")
+        return True
+
+    def test_daily_plan_uses_configured_gemini_model(self):
+        plan_data = generate_fallback_plan([])
+        api_call = {}
+
+        def fake_generate_content(**kwargs):
+            api_call.update(kwargs)
+            return SimpleNamespace(parsed=plan_data, text=None)
+
+        fake_client = SimpleNamespace(
+            models=SimpleNamespace(generate_content=fake_generate_content)
+        )
+        fake_genai = SimpleNamespace(Client=lambda **kwargs: fake_client)
+        fake_types = SimpleNamespace(
+            GenerateContentConfig=lambda **kwargs: kwargs
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.multiple(
+                research_trend,
+                GEMINI_API_KEY="test-key",
+                GEMINI_MODEL="configured-test-model",
+                DAILY_PLAN_FILE=str(Path(temp_dir) / "plan.json"),
+                load_history=lambda: [],
+                save_history=lambda history: None,
+                genai=fake_genai,
+                types=fake_types,
+                HAS_GENAI=True,
+                create=True,
+            ):
+                generate_daily_plan()
+
+        assert api_call["model"] == "configured-test-model"
+        print("  ✓ Daily planner sends the configured Gemini model")
+        return True
+
+
 class TestUpscaling:
     """Test upscaling functionality."""
 
@@ -1187,6 +1249,9 @@ def run_all_tests():
     results.append(("Repair without extra requests", interior_tests.test_filled_generation_is_repaired_without_extra_requests()))
     results.append(("Illustrate distinct story scenes", interior_tests.test_story_scene_details_reach_the_image_prompt()))
     results.append(("Unique fallback story pages", interior_tests.test_fallback_plan_has_distinct_story_beats()))
+    plan_tests = TestDailyPlan()
+    results.append(("Sea otter fallback habitat", plan_tests.test_sea_otter_fallback_matches_its_habitat()))
+    results.append(("Configured Gemini model", plan_tests.test_daily_plan_uses_configured_gemini_model()))
 
     # Upscaling
     print("\n" + "=" * 70)

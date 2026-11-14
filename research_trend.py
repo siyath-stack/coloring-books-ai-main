@@ -11,6 +11,11 @@ except ImportError:
     HAS_GENAI = False
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_MODEL = (
+    os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
+    or DEFAULT_GEMINI_MODEL
+)
 HISTORY_FILE = "used_topics.json"
 DAILY_PLAN_FILE = "daily_book_plan.json"
 
@@ -74,7 +79,7 @@ def generate_fallback_plan(history):
             "category": "Pip's Big Day",
             "target_age": "Ages 2-5 Toddler Bold & Easy",
             "character_dna": "adorable chubby baby sea otter pup, round belly, small rounded ears, simple whisker dots, 2D vector line art",
-            "habitat_rules": "Simple open scenes with a few large story details and plenty of white space",
+            "habitat_rules": "Simple open coastal scenes around a kelp forest and rocky shore, with a few large story details and plenty of white space",
         }
     ]
 
@@ -113,6 +118,39 @@ def generate_fallback_plan(history):
         ("says goodnight to the sunflower", "The sunflower beside the garden gate at twilight", "A quiet close view with the animal beside the flower", "Goodnight, sunflower. Thank you for growing."),
         ("curls up for sleep dreaming of tomorrow's garden", "A cozy nest with a small flower and one safe seed nearby", "A peaceful centered bedtime scene with open white space", "A new seed waits for tomorrow's adventure."),
     ]
+    if selected["subject"] == "Pip the Playful Sea Otter Pup":
+        story_beats = [
+            ("wakes floating in a calm bed of kelp", "A quiet kelp bed on the ocean surface at sunrise", "A wide view with Pip floating near the center and open sky above", "Pip wakes as the morning waves gently roll."),
+            ("spots a smooth shell beside the kelp", "A small shell resting on a low tide pool rock", "A close view with Pip looking down at the shell", "A shiny shell catches Pip's curious eye."),
+            ("paddles toward a rocky tide pool", "A shallow tide pool among a few rounded shore rocks", "A side view with Pip paddling toward the pool", "Pip sets off to explore the tide pool."),
+            ("peeks beneath the clear water", "A simple underwater view with sand and two strands of kelp", "A low viewpoint looking across the pool toward Pip", "What might be hiding under the water?"),
+            ("finds a clam tucked into the sand", "A single clam resting in a patch of smooth sand", "A close view with Pip noticing the clam from above", "Pip discovers a clam nestled in the sand."),
+            ("brings the clam up to the surface", "A calm patch of ocean beside a low rock", "A three-quarter view of Pip surfacing with the clam", "Up to the surface comes the little clam."),
+            ("taps the clam gently with a smooth stone", "A smooth stone and closed clam held above the water", "A close view focused on Pip and the stone", "Tap, tap! Pip uses a smooth stone."),
+            ("opens the clam and finds a tasty bite", "An open clam and a few small ripples", "A centered view with Pip floating on its back", "The clam opens, and Pip finds a tasty snack."),
+            ("enjoys breakfast while floating", "A calm ocean surface with a few floating kelp leaves", "A relaxed overhead view with Pip floating safely", "Breakfast tastes good on the gentle waves."),
+            ("dives along a tall strand of kelp", "Tall kelp fronds rising from the ocean floor", "A vertical composition with Pip swimming beside the kelp", "Pip dives into the swaying kelp forest."),
+            ("greets a little fish near the kelp", "Two small fish swimming beside one broad kelp leaf", "A balanced view with Pip and the fish on opposite sides", "A little fish swims by to say hello."),
+            ("follows a trail of bubbles", "A few large bubbles rising above the sandy ocean floor", "A diagonal view following bubbles toward Pip", "Pip follows the bubbles on a new adventure."),
+            ("notices a sea star resting on a rock", "A single sea star on a broad, flat rock", "A close view with Pip peeking around the rock", "A sea star rests quietly on a sunny rock."),
+            ("watches a crab scuttle across the shore", "A small crab crossing a simple stretch of wet sand", "A ground-level view of Pip watching the crab", "A little crab scuttles sideways past Pip."),
+            ("swims through a natural kelp arch", "Two curved kelp fronds forming a wide open arch", "A centered view of Pip swimming through the arch", "Pip glides through a swaying kelp arch."),
+            ("rests beside a sunlit shore rock", "A broad smooth rock beside a few calm waves", "A quiet side view with Pip resting by the rock", "A warm rock makes a cozy place to rest."),
+            ("spots a cluster of mussels", "A few large mussels attached to one shore rock", "A close view with Pip looking at the mussels", "Pip finds mussels gathered on a rock."),
+            ("splashes playfully in the shallows", "A shallow shoreline with a few simple ripples", "A wide view with Pip making a small splash", "Pip makes a playful splash in the shallows."),
+            ("meets another otter pup near the kelp", "Two sea otter pups floating beside a kelp frond", "A full-body view with both pups comfortably spaced", "A new otter friend joins Pip's ocean day."),
+            ("plays a gentle game of peekaboo", "A broad kelp leaf between two floating otter pups", "A playful view with each pup peeking around the leaf", "Peekaboo! Pip and a friend giggle in the kelp."),
+            ("explores a sandy stretch of shore", "A simple sandy shore with a few round shells", "A wide landscape view with Pip walking along the waterline", "Pip finds a sandy path beside the waves."),
+            ("carries a tiny shell back to the water", "One small shell beside a trail of soft footprints", "A low side view of Pip carrying the shell", "Pip carries a little shell back to the sea."),
+            ("watches a wave curl around the rocks", "A small curling wave between two rounded rocks", "A view from behind Pip looking toward the wave", "A gentle wave curls around the shore rocks."),
+            ("floats on its back beneath the open sky", "A calm ocean surface with a few distant clouds", "An overhead view of Pip floating with plenty of open space", "Pip drifts gently beneath the open sky."),
+            ("shares a clam snack with its otter friend", "Two otter pups floating with one opened clam between them", "A friendly centered view with both pups fully visible", "Pip shares a tasty clam with a friend."),
+            ("paddles home as the sun begins to set", "The kelp bed beneath a simple evening sky", "A wide view with Pip paddling toward the kelp", "The evening sun colors the waves as Pip heads home."),
+            ("settles into the kelp bed for a rest", "A quiet floating kelp bed on the calm ocean", "A peaceful close view with Pip nestled among kelp leaves", "Pip finds a cozy place to rest in the kelp."),
+            ("watches the first stars appear", "A calm ocean beneath a crescent moon and a few stars", "A wide evening view with Pip looking up", "The first stars twinkle above the sea."),
+            ("says goodnight to the moonlit waves", "A few gentle waves beneath a bright crescent moon", "A quiet view with Pip beside a low kelp frond", "Goodnight, gentle waves. Goodnight, moon."),
+            ("curls up in the kelp and dreams of tomorrow", "A cozy kelp bed floating under the night sky", "A peaceful centered bedtime scene with open white space", "Pip drifts to sleep, dreaming of another ocean day."),
+        ]
     scenes = [
         {
             "action": action,
@@ -152,7 +190,7 @@ TASK:
         try:
             client = genai.Client(api_key=GEMINI_API_KEY)
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model=GEMINI_MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
