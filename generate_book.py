@@ -255,11 +255,32 @@ def clean_and_thicken_line_art(gray_pil_img):
 def add_print_safe_margin(gray_pil_img):
     pixels = np.asarray(gray_pil_img.convert("L"), dtype=np.uint8)
     height, width = pixels.shape
-    resized = Image.fromarray(pixels).resize(
-        (int(width * 0.75), int(height * 0.75)),
-        Image.Resampling.LANCZOS,
+    ink = cv2.dilate(
+        np.uint8(pixels <= 140),
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        iterations=1,
     )
-    framed = Image.new("L", (width, height), "white")
+    binary = cv2.bitwise_not(ink * 255)
+    rows, columns = np.nonzero(binary == 0)
+    if not rows.size:
+        return Image.fromarray(binary)
+
+    content = binary[
+        rows.min():rows.max() + 1,
+        columns.min():columns.max() + 1,
+    ]
+    scale = min(
+        width * 0.75 / content.shape[1],
+        height * 0.75 / content.shape[0],
+    )
+    resized = Image.fromarray(content).resize(
+        (
+            max(1, round(content.shape[1] * scale)),
+            max(1, round(content.shape[0] * scale)),
+        ),
+        Image.Resampling.NEAREST,
+    )
+    framed = Image.new("L", (width, height), 255)
     framed.paste(resized, ((width - resized.width) // 2, (height - resized.height) // 2))
     return framed
 
@@ -933,9 +954,15 @@ def generate_vector_interior_page(character_dna, scene_data, page_num):
         "artwork is not centered",
     }):
         framed_candidate = add_print_safe_margin(candidate)
-        if not line_art_quality_issues(framed_candidate):
+        recovery_issues = line_art_quality_issues(framed_candidate)
+        if not recovery_issues:
             print(f"[Notice] Page {page_num} accepted after adding a print-safe white margin.")
             img = framed_candidate
+        else:
+            print(
+                f"[Warning] Page {page_num} still fails after adding a print-safe white margin: "
+                f"{', '.join(recovery_issues)}"
+            )
 
     if img is None:
         raise RuntimeError(

@@ -710,6 +710,24 @@ class TestInteriorLineArtQuality:
         print("  ✓ Edge-touching art is reframed with a white margin after retries")
         return True
 
+    def test_thin_cropped_art_recovers_without_speckle_failure(self):
+        image = Image.new("L", (768, 768), "white")
+        ImageDraw.Draw(image).ellipse((0, 0, 767, 767), outline="black", width=1)
+        encoded = BytesIO()
+        image.save(encoded, format="PNG")
+        scene = {"action": "looks around", "micro_prompt": "Color the animal!"}
+
+        with patch(
+            "generate_book.fetch_book_image",
+            return_value=encoded.getvalue(),
+        ) as fetch:
+            page = generate_vector_interior_page("a small animal", scene, 6)
+
+        assert page.size == (2550, 3300)
+        assert fetch.call_count == 3
+        print("  ✓ Thin edge-cropped art recovers without creating speckle noise")
+        return True
+
     def test_quality_check_rejects_filled_animal(self):
         image = Image.new("L", (768, 768), "white")
         ImageDraw.Draw(image).ellipse((120, 80, 650, 690), fill="black")
@@ -1159,6 +1177,7 @@ def run_all_tests():
     results.append(("Accept clean outline art", interior_tests.test_clean_outline_is_accepted_with_white_coloring_space()))
     results.append(("Simplify repeated crop failures", interior_tests.test_repeated_cropping_simplifies_the_retry_scene()))
     results.append(("Reframe edge-touching interior art", interior_tests.test_edge_touching_art_gets_a_print_safe_margin_after_retries()))
+    results.append(("Recover thin cropped art", interior_tests.test_thin_cropped_art_recovers_without_speckle_failure()))
     results.append(("Reject filled interior art", interior_tests.test_quality_check_rejects_filled_animal()))
     results.append(("Repair solid-filled animal", interior_tests.test_solid_fill_is_converted_to_open_coloring_shape()))
     results.append(("Remove circular backdrop", interior_tests.test_large_circular_backdrop_is_not_traced()))
